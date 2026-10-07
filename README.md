@@ -1,2 +1,2 @@
 # pythonprojects
-this is only my begineer project
+this is only my beginenr project
