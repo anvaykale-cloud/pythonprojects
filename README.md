@@ -1,2 +1,3 @@
 # pythonprojects
-this is only my beginenr project
+this are  my beginner project pls dont judge bro 
+
