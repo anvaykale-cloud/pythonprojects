@@ -1,0 +1,396 @@
+
+import gradio as gr
+import pandas as pd
+import plotly.graph_objects as go
+from datetime import datetime
+
+# ---------------- CSS DESIGN ----------------
+
+custom_css = """
+.gradio-container {
+    background: linear-gradient(to right, #ffecd2, #fcb69f) !important;
+    max-width: 1400px !important;
+}
+
+h1, h2, h3, p, label {
+    color: #2c3e50 !important;
+}
+
+.panel {
+    background: rgba(255, 255, 255, 0.75);
+    padding: 20px;
+    border-radius: 15px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+}
+
+.result-box {
+    background: white;
+    padding: 15px;
+    border-radius: 12px;
+    margin: 8px 0;
+}
+"""
+
+# ---------------- BMI CALCULATION ----------------
+
+def calculate_bmi(age, gender, activity, unit, weight_input,
+                  height_input, history):
+
+    history = list(history or [])
+
+    # Convert measurements into metric units
+    if unit == "Metric (kg, cm)":
+        weight = weight_input
+        height_m = height_input / 100
+    else:
+        weight = weight_input * 0.453592
+        height_m = height_input * 0.3048
+
+    if weight <= 0 or height_m <= 0:
+        return (
+            "Invalid measurements", "N/A", "N/A",
+            "Please enter valid measurements.",
+            None, "N/A", history,
+            pd.DataFrame(history)
+        )
+
+    # Calculate BMI
+    bmi = weight / (height_m ** 2)
+
+    # Determine BMI category
+    if bmi < 18.5:
+        category = "Underweight"
+        color = "#3498db"
+        advice = (
+            "Consider discussing your nutritional needs "
+            "with a healthcare professional."
+        )
+    elif bmi < 25:
+        category = "Normal weight"
+        color = "#27ae60"
+        advice = (
+            "Maintain balanced nutrition, regular activity, "
+            "and healthy sleep habits."
+        )
+    elif bmi < 30:
+        category = "Overweight"
+        color = "#f39c12"
+        advice = (
+            "Consider sustainable nutrition and activity habits. "
+            "Consult a healthcare professional if needed."
+        )
+    else:
+        category = "Obese"
+        color = "#e74c3c"
+        advice = (
+            "Consider consulting a healthcare professional "
+            "for personalised guidance."
+        )
+
+    # Activity multipliers for estimated daily energy needs
+    activity_multipliers = {
+        "Sedentary": 1.2,
+        "Lightly active": 1.375,
+        "Moderately active": 1.55,
+        "Very active": 1.725,
+        "Extra active": 1.9
+    }
+
+    multiplier = activity_multipliers[activity]
+
+    # Mifflin-St Jeor estimated BMR
+    height_cm = height_m * 100
+
+    if gender == "Male":
+        bmr = (
+            10 * weight + 6.25 * height_cm
+            - 5 * age + 5
+        )
+    else:
+        bmr = (
+            10 * weight + 6.25 * height_cm
+            - 5 * age - 161
+        )
+
+    tdee = bmr * multiplier
+
+    # Calculate reference weight range
+    ideal_min = 18.5 * height_m ** 2
+    ideal_max = 24.9 * height_m ** 2
+
+    if unit == "Metric (kg, cm)":
+        weight_range = (
+            f"{ideal_min:.1f}–{ideal_max:.1f} kg"
+        )
+    else:
+        weight_range = (
+            f"{ideal_min / 0.453592:.1f}–"
+            f"{ideal_max / 0.453592:.1f} lbs"
+        )
+
+    # Plotly BMI gauge
+    fig = go.Figure(
+        go.Indicator(
+            mode="gauge+number",
+            value=bmi,
+            number={"valueformat": ".1f"},
+            title={"text": "Body Mass Index (BMI)"},
+            gauge={
+                "axis": {
+                    "range": [10, 45],
+                    "tickwidth": 1
+                },
+                "bar": {"color": color},
+                "steps": [
+                    {
+                        "range": [10, 18.5],
+                        "color": "#aed6f1"
+                    },
+                    {
+                        "range": [18.5, 25],
+                        "color": "#a9dfbf"
+                    },
+                    {
+                        "range": [25, 30],
+                        "color": "#fad7a0"
+                    },
+                    {
+                        "range": [30, 45],
+                        "color": "#f1948a"
+                    }
+                ],
+                "threshold": {
+                    "line": {
+                        "color": "#2c3e50",
+                        "width": 4
+                    },
+                    "thickness": 0.75,
+                    "value": bmi
+                }
+            }
+        )
+    )
+
+    fig.update_layout(
+        height=300,
+        margin=dict(t=45, b=15, l=20, r=20),
+        paper_bgcolor="rgba(0,0,0,0)",
+        font={"color": "#2c3e50"}
+    )
+
+    # Add this calculation to session history
+    history.append({
+        "Time": datetime.now().strftime("%H:%M:%S"),
+        "BMI": round(bmi, 1),
+        "Category": category
+    })
+
+    history_df = pd.DataFrame(history)
+
+    return (
+        f"{bmi:.1f}",
+        category,
+        f"{tdee:.0f} kcal/day",
+        advice,
+        fig,
+        weight_range,
+        history,
+        history_df
+    )
+
+
+# ---------------- CLEAR HISTORY ----------------
+
+def clear_history():
+    return [], pd.DataFrame(
+        columns=["Time", "BMI", "Category"]
+    )
+
+
+# ---------------- GRADIO INTERFACE ----------------
+
+with gr.Blocks(
+    title="Pro Health & BMI Dashboard",
+    css=custom_css,
+    theme=gr.themes.Soft()
+) as demo:
+
+    gr.Markdown(
+        """
+        #  Pro Health & BMI Dashboard
+
+        ### Advanced health metrics at a glance
+        """
+    )
+
+    with gr.Row(equal_height=False):
+
+        # LEFT: USER INPUTS
+        with gr.Column(scale=1):
+
+            with gr.Group(elem_classes=["panel"]):
+
+                gr.Markdown("##  Enter Your Parameters")
+
+                gr.Markdown(
+                    "**What is BMI?** Body Mass Index uses "
+                    "height and weight to estimate a person's "
+                    "weight category."
+                )
+
+                age = gr.Slider(
+                    minimum=1,
+                    maximum=120,
+                    value=25,
+                    step=1,
+                    label="Age (years)"
+                )
+
+                gender = gr.Radio(
+                    choices=["Male", "Female"],
+                    value="Male",
+                    label="Gender (for BMR equation)"
+                )
+
+                activity = gr.Dropdown(
+                    choices=[
+                        "Sedentary",
+                        "Lightly active",
+                        "Moderately active",
+                        "Very active",
+                        "Extra active"
+                    ],
+                    value="Moderately active",
+                    label="Activity Level"
+                )
+
+                unit = gr.Radio(
+                    choices=[
+                        "Metric (kg, cm)",
+                        "Imperial (lbs, ft)"
+                    ],
+                    value="Metric (kg, cm)",
+                    label="Unit System"
+                )
+
+                weight_input = gr.Number(
+                    value=70,
+                    minimum=1,
+                    maximum=700,
+                    label="Weight (kg for metric, lbs for imperial)"
+                )
+
+                height_input = gr.Number(
+                    value=170,
+                    minimum=1,
+                    maximum=300,
+                    label=(
+                        "Height (cm for metric, decimal feet "
+                        "for imperial; e.g. 5.7 ft)"
+                    )
+                )
+
+                calculate = gr.Button(
+                    " Calculate BMI",
+                    variant="primary",
+                    size="lg"
+                )
+
+        # RIGHT: RESULTS
+        with gr.Column(scale=1):
+
+            with gr.Group(elem_classes=["panel"]):
+
+                gr.Markdown("##  Your Results")
+
+                with gr.Row():
+                    bmi_output = gr.Textbox(
+                        label="BMI Score",
+                        interactive=False
+                    )
+
+                    category_output = gr.Textbox(
+                        label="BMI Category",
+                        interactive=False
+                    )
+
+                tdee_output = gr.Textbox(
+                    label="Estimated Daily Calories (TDEE)",
+                    interactive=False
+                )
+
+                advice_output = gr.Textbox(
+                    label=" Health Advice",
+                    lines=3,
+                    interactive=False
+                )
+
+                bmi_chart = gr.Plot(
+                    label="BMI Gauge"
+                )
+
+                ideal_weight = gr.Textbox(
+                    label=" Reference Weight Range",
+                    interactive=False
+                )
+
+    # HISTORY
+    gr.Markdown("---")
+    gr.Markdown("##  BMI History (This Session)")
+
+    history_state = gr.State([])
+
+    history_table = gr.Dataframe(
+        headers=["Time", "BMI", "Category"],
+        value=pd.DataFrame(
+            columns=["Time", "BMI", "Category"]
+        ),
+        interactive=False,
+        label="Previous Calculations"
+    )
+
+    clear_button = gr.Button(
+        " Clear History",
+        variant="secondary"
+    )
+
+    # Connect calculation button to function
+    calculate.click(
+        fn=calculate_bmi,
+        inputs=[
+            age,
+            gender,
+            activity,
+            unit,
+            weight_input,
+            height_input,
+            history_state
+        ],
+        outputs=[
+            bmi_output,
+            category_output,
+            tdee_output,
+            advice_output,
+            bmi_chart,
+            ideal_weight,
+            history_state,
+            history_table
+        ]
+    )
+
+    # Connect clear-history button
+    clear_button.click(
+        fn=clear_history,
+        inputs=[],
+        outputs=[
+            history_state,
+            history_table
+        ]
+    )
+
+    gr.Markdown(
+        """
+    )
+
+if __name__ == "__main__":
+    demo.launch()
